@@ -1,0 +1,324 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Engage every sense</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=DM+Sans:opsz,wght@9..40,300;9..40,400;9..40,500;9..40,600&display=swap" rel="stylesheet">
+<style>
+  :root{
+    --bg:#04060F;
+    --ink:#FBF8F1;
+    --muted:#BAB4AA;
+    box-sizing:border-box;
+  }
+  *{box-sizing:border-box;}
+  html,body{height:100%;margin:0;}
+  body{
+    background:var(--bg);
+    color:var(--ink);
+    font-family:"DM Sans",system-ui,sans-serif;
+    -webkit-font-smoothing:antialiased;
+    overflow:hidden;
+  }
+
+  canvas#bloom{
+    position:fixed; inset:0;
+    width:100%; height:100%;
+    z-index:0; display:block;
+  }
+
+  .stage{
+    position:relative;
+    z-index:2;
+    height:100%;
+    display:flex;
+    flex-direction:column;
+    justify-content:space-between;
+    align-items:center;
+    text-align:center;
+    padding:calc(clamp(34px,7vh,72px) + env(safe-area-inset-top,0px)) clamp(20px,5vw,48px)
+            calc(clamp(30px,6vh,60px) + env(safe-area-inset-bottom,0px));
+    pointer-events:none;
+  }
+
+  .head{max-width:34ch;}
+  .prompt{
+    font-size:clamp(0.78rem,1.5vw,0.9rem);
+    color:var(--muted);
+    font-weight:300;
+    letter-spacing:0.04em;
+    margin-bottom:14px;
+    opacity:.85;
+  }
+  .brand{
+    font-size:clamp(1.7rem,4.4vw,2.7rem);
+    font-weight:500;
+    letter-spacing:0.02em;
+    line-height:1.1;
+    transition:color .6s ease;
+  }
+  .emotion-notes{
+    margin-top:12px;
+    font-size:clamp(0.82rem,1.7vw,0.98rem);
+    color:var(--muted);
+    font-weight:400;
+    letter-spacing:0.02em;
+    transition:opacity .5s ease;
+    min-height:1.4em;
+  }
+
+  .selector{
+    pointer-events:auto;
+    display:flex;
+    gap:clamp(10px,2.4vw,26px);
+    flex-wrap:wrap;
+    justify-content:center;
+  }
+  .selector button{
+    pointer-events:auto;
+    background:none; border:none; cursor:pointer;
+    font-family:inherit;
+    font-size:clamp(0.88rem,1.9vw,1.05rem);
+    font-weight:400;
+    color:var(--muted);
+    letter-spacing:0.01em;
+    padding:8px 4px 12px;
+    position:relative;
+    transition:color .4s ease;
+  }
+  .selector button::after{
+    content:"";
+    position:absolute;
+    left:50%; bottom:2px;
+    width:5px; height:5px; border-radius:50%;
+    background:currentColor;
+    transform:translateX(-50%) scale(0);
+    transition:transform .4s cubic-bezier(.2,.7,.3,1), background-color .4s ease;
+  }
+  .selector button:hover{color:var(--ink);}
+  .selector button[aria-pressed="true"]{color:var(--ink);}
+  .selector button[aria-pressed="true"]::after{transform:translateX(-50%) scale(1);}
+  .selector button:focus-visible{outline:2px solid rgba(242,236,226,.5);outline-offset:3px;border-radius:4px;}
+
+  .grain{
+    position:fixed;inset:0;width:100%;height:100%;
+    opacity:0.05; mix-blend-mode:soft-light;
+    pointer-events:none; z-index:1;
+  }
+</style>
+</head>
+<body>
+  <canvas id="bloom"></canvas>
+
+  <div class="stage">
+    <div class="head">
+      <div class="brand" id="brand">INOASIS</div>
+      <div class="emotion-notes" id="enotes">Bright, warm, uplifting</div>
+    </div>
+
+    <div class="selector" id="selector" role="group" aria-label="Choose an emotion"></div>
+  </div>
+
+  <svg class="grain" aria-hidden="true">
+    <filter id="noise"><feTurbulence type="fractalNoise" baseFrequency="0.9" numOctaves="2" stitchTiles="stitch"/></filter>
+    <rect width="100%" height="100%" filter="url(#noise)"/>
+  </svg>
+
+<script>
+(function(){
+  const reduce = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+  const BG = [4,6,15]; // #04060F
+
+  // Each emotion has the colours we associate with it and a way of moving.
+  //   palette = the colours that diffuse; character = HOW it moves:
+  //   speed = reach   spread = how wide it fans   size = body   turb = restlessness
+  const emotions = [
+    {key:'joy',     name:'Joy',     notes:'Bright, warm, uplifting',
+     palette:['#F2C94C','#F6DD8A','#E8A94E'], speed:0.62, spread:0.84, size:1.00, turb:0.34},
+    {key:'calm',    name:'Calm',    notes:'Soft, still, at ease',
+     palette:['#7FA7D9','#A9C6E8','#4F6FA8'], speed:0.34, spread:0.56, size:1.32, turb:0.18},
+    {key:'love',    name:'Love',    notes:'Tender, close, open',
+     palette:['#E08AA8','#F2B8C8','#C25E80'], speed:0.46, spread:0.66, size:1.18, turb:0.26},
+    {key:'hope',    name:'Hope',    notes:'Fresh, growing, renewed',
+     palette:['#8FC08A','#C4DDA0','#5E9468'], speed:0.50, spread:0.74, size:1.08, turb:0.30},
+    {key:'passion', name:'Passion', notes:'Intense, alive, bold',
+     palette:['#D9644A','#E89A6E','#A83E34'], speed:0.66, spread:0.80, size:0.98, turb:0.52},
+    {key:'wonder',  name:'Wonder',  notes:'Curious, dreamy, deep',
+     palette:['#9A86D0','#C2B3E6','#5F4E9C'], speed:0.48, spread:0.72, size:1.10, turb:0.44},
+  ];
+  const DEFAULT_INDEX=0;
+
+  // ---- build selector ----
+  const selEl=document.getElementById('selector');
+  const brandEl=document.getElementById('brand');
+  const notesEl=document.getElementById('enotes');
+  // brighten a hex toward white so the wordmark tint stays legible on the dark background
+  function lighten(hex,f){
+    const n=parseInt(hex.slice(1),16);
+    const r=(n>>16)&255,g=(n>>8)&255,b=n&255;
+    const m=c=>Math.round(c+(255-c)*f);
+    return `rgb(${m(r)},${m(g)},${m(b)})`;
+  }
+  let current=emotions[DEFAULT_INDEX];
+  brandEl.style.color=lighten(current.palette[0],0.55);
+  notesEl.textContent=current.notes;
+  const buttons=emotions.map((s,i)=>{
+    const b=document.createElement('button');
+    b.textContent=s.name;
+    b.setAttribute('aria-pressed', i===DEFAULT_INDEX ? 'true':'false');
+    b.style.setProperty('color', i===DEFAULT_INDEX ? s.palette[0] : '');
+    b.addEventListener('mouseenter',()=>{ if(!('ontouchstart'in window)) select(s,false); });
+    b.addEventListener('mouseleave',()=>{ if(!('ontouchstart'in window)) select(current,false); });
+    b.addEventListener('click',()=>{ current=s; select(s,true); });
+    b.addEventListener('focus',()=>select(s,false));
+    selEl.appendChild(b);
+    return b;
+  });
+
+  function select(s, lock){
+    // INOASIS stays put; only the emotion description fades between states
+    if(notesEl.textContent!==s.notes){
+      notesEl.style.opacity=0;
+      setTimeout(()=>{ notesEl.textContent=s.notes; notesEl.style.opacity=1; },260);
+    }
+    buttons.forEach((b,i)=>{
+      const active = emotions[i].key===s.key;
+      b.setAttribute('aria-pressed', active?'true':'false');
+      b.style.color = active ? s.palette[0] : '';
+    });
+    if(lock){ current=s; }
+    brandEl.style.color=lighten(s.palette[0],0.55);
+    setTarget(s);
+  }
+
+  // ---- canvas bloom ----
+  const canvas=document.getElementById('bloom');
+  const ctx=canvas.getContext('2d');
+  let W=0,H=0,DPR=1,cx=0,cy=0;
+  function resize(){
+    DPR=Math.min(window.devicePixelRatio||1,2);
+    W=window.innerWidth; H=window.innerHeight;
+    canvas.width=W*DPR; canvas.height=H*DPR;
+    ctx.setTransform(DPR,0,0,DPR,0,0);
+    cx=W/2; cy=H*0.46;
+    if(reduce) drawStatic();
+  }
+  window.addEventListener('resize',resize);
+
+  function toRgb(hex){const n=parseInt(hex.slice(1),16);return [(n>>16)&255,(n>>8)&255,n&255];}
+  function rgba(rgb,a){return `rgba(${rgb[0]|0},${rgb[1]|0},${rgb[2]|0},${a})`;}
+  function hexA(hex,a){return rgba(toRgb(hex),a);}
+  function pick(pal){return pal[(Math.random()*pal.length)|0];}
+
+  let char={speed:current.speed,spread:current.spread,size:current.size,turb:current.turb};
+  let targetChar={...char};
+  let targetPalette=current.palette.slice();
+  let core=toRgb(current.palette[0]);
+  let targetCore=toRgb(current.palette[0]);
+  function setTarget(s){
+    targetChar={speed:s.speed,spread:s.spread,size:s.size,turb:s.turb};
+    targetPalette=s.palette.slice();
+    targetCore=toRgb(s.palette[0]);
+    if(reduce) drawStatic();
+  }
+
+  // ---- reduced motion: static layered bloom, recolour on select ----
+  function drawStatic(){
+    ctx.clearRect(0,0,W,H);
+    ctx.fillStyle=rgba(BG,1); ctx.fillRect(0,0,W,H);
+    const pal=targetPalette;
+    const R=Math.min(W,H)*0.5;
+    [[0,R,0.34],[0,R*0.66,0.30],[0,R*0.4,0.34]].forEach((layer,i)=>{
+      const col=pal[i%pal.length];
+      const g=ctx.createRadialGradient(cx,cy,0,cx,cy,layer[1]);
+      g.addColorStop(0,hexA(col,layer[2]));
+      g.addColorStop(1,hexA(col,0));
+      ctx.fillStyle=g; ctx.fillRect(0,0,W,H);
+    });
+  }
+  if(reduce){ resize(); return; }
+
+  resize();
+
+  // ---- particle diffusion ----
+  const particles=[];
+  const MAX=200;
+  const BASE=0.9;
+  function spawn(){
+    const ang=Math.random()*Math.PI*2;
+    const spd=(0.35+Math.random()*0.95)*char.speed*BASE;
+    const jitter=18*char.spread;
+    particles.push({
+      x:cx+(Math.random()-0.5)*jitter,
+      y:cy+(Math.random()-0.5)*jitter,
+      vx:Math.cos(ang)*spd,
+      vy:Math.sin(ang)*spd,
+      life:0,
+      maxLife:3200+Math.random()*3400,
+      size:(46+Math.random()*66)*char.size,
+      color:pick(targetPalette),
+      seed:Math.random()*1000
+    });
+  }
+
+  let last=performance.now();
+  let breath=0;
+  function frame(now){
+    const dt=Math.min(now-last,50); last=now;
+
+    char.speed +=(targetChar.speed -char.speed)*0.04;
+    char.spread+=(targetChar.spread-char.spread)*0.04;
+    char.size  +=(targetChar.size  -char.size)*0.04;
+    char.turb  +=(targetChar.turb  -char.turb)*0.04;
+    for(let i=0;i<3;i++) core[i]+=(targetCore[i]-core[i])*0.03;
+
+    // smoky fade toward the #04060F background
+    ctx.globalCompositeOperation='source-over';
+    ctx.fillStyle=rgba(BG,0.18);
+    ctx.fillRect(0,0,W,H);
+
+    breath+=dt*0.0006;
+    const coreR=Math.min(W,H)*(0.16+0.02*Math.sin(breath));
+    ctx.globalCompositeOperation='screen';
+    const cg=ctx.createRadialGradient(cx,cy,0,cx,cy,coreR);
+    cg.addColorStop(0,rgba(core,0.11+0.02*Math.sin(breath)));
+    cg.addColorStop(1,rgba(core,0));
+    ctx.fillStyle=cg;
+    ctx.beginPath(); ctx.arc(cx,cy,coreR,0,Math.PI*2); ctx.fill();
+
+    const rate=1.4+char.speed*2.6;
+    let toSpawn=rate;
+    while(toSpawn>0){ if(Math.random()<toSpawn && particles.length<MAX) spawn(); toSpawn--; }
+
+    for(let i=particles.length-1;i>=0;i--){
+      const p=particles[i];
+      p.life+=dt;
+      const t=p.life/p.maxLife;
+      if(t>=1){ particles.splice(i,1); continue; }
+      p.vx+=Math.sin(p.y*0.010+p.seed)*0.0022*char.turb*dt;
+      p.vy+=Math.cos(p.x*0.010+p.seed)*0.0022*char.turb*dt;
+      p.vx*=0.995; p.vy*=0.995;
+      p.x+=p.vx*dt*0.06;
+      p.y+=p.vy*dt*0.06;
+
+      const size=p.size*(0.5+t*1.4);
+      let a = t<0.16 ? t/0.16 : 1-(t-0.16)/0.84;
+      a=Math.max(0,a)*0.22;
+
+      const g=ctx.createRadialGradient(p.x,p.y,0,p.x,p.y,size);
+      g.addColorStop(0,hexA(p.color,a));
+      g.addColorStop(1,hexA(p.color,0));
+      ctx.fillStyle=g;
+      ctx.beginPath(); ctx.arc(p.x,p.y,size,0,Math.PI*2); ctx.fill();
+    }
+
+    requestAnimationFrame(frame);
+  }
+  requestAnimationFrame(frame);
+})();
+</script>
+</body>
+</html>
